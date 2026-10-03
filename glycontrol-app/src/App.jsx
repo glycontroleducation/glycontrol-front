@@ -1863,9 +1863,8 @@ async function tentarProxyArtifacts(system, mensagensAPI) {
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
       system,
-      messages: mensagensAPI,
-    }),
-  });
+      messages: mensagensAPI,   
+});
   if (!response.ok) throw new Error("Falha na resposta da IA (Artifacts)");
   const data = await response.json();
   const texto = (data.content || [])
