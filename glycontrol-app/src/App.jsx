@@ -1839,7 +1839,7 @@ CONTEXTO ATUAL DO USUÁRIO (já calculado, não recalcule nada):
    disso, a chamada falha rápido (404/erro de rede) e o chamador
    (gerarRespostaChatIA) segue para a próxima opção. */
 async function tentarBackendLocal(system, mensagensAPI) {
-  const response = await fetch("/api/chat", {
+  const response = await fetch("https://mediumblue-grouse-339635.hostingersite.com/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, messages: mensagensAPI }),
