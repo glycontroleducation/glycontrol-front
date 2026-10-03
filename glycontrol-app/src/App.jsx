@@ -1856,14 +1856,15 @@ async function tentarBackendLocal(system, mensagensAPI) {
    Claude.ai (não funciona rodando localmente pelo VS Code, pois ali
    não há autenticação/proxy do Claude.ai disponível no navegador). */
 async function tentarProxyArtifacts(system, mensagensAPI) {
-  const response = await fetch("https://mediumblue-grouse-339635.hostingersite.com/api/chat, {
+  const response = await fetch("https://mediumblue-grouse-339635.hostingersite.com/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
       system,
-      messages: mensagensAPI,   
+      messages: mensagensAPI,  
+    })
 });
   if (!response.ok) throw new Error("Falha na resposta da IA (Artifacts)");
   const data = await response.json();
