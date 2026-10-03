@@ -1,0 +1,24 @@
+<!--
+  index.html — página HTML "casca" carregada pelo navegador.
+  Ela só contém uma <div id="root"> vazia: é ali que o React
+  (começando por src/main.jsx) desenha todas as telas do GlyControl.
+  Não é preciso editar este arquivo para mudar telas ou textos do
+  app — isso é feito em src/App.jsx.
+-->
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Trava o zoom automático em celulares para o layout não "pular"
+         ao tocar em campos de texto — importante para o público idoso,
+         que já tem letras grandes fixas no próprio design do app. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>GlyControl</title>
+  </head>
+  <body>
+    <!-- O React injeta todo o aplicativo dentro desta div. -->
+    <div id="root"></div>
+    <!-- Ponto de entrada do JavaScript (ver src/main.jsx). -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+/* index.css — estilos globais mínimos do GlyControl.
+   Quase todo o visual do app (cores, tamanhos de fonte, espaçamento)
+   fica dentro do próprio App.jsx, no objeto COLORS e nos estilos
+   inline de cada componente — isso facilita manter tudo consistente
+   num só lugar. Este arquivo cuida só do "reset" básico da página. */
+
+/* Faz padding/border não aumentarem o tamanho final de caixas — evita
+   contas de layout confusas em telas pequenas de celular. */
+* {
+  box-sizing: border-box;
+}
+
+/* Remove margens padrão do navegador e garante que o fundo da página
+   cubra a tela toda (inclusive quando o conteúdo é menor que a tela). */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: #F4F1EA;
+}
+
+/* Deixa a renderização das letras mais suave em telas Apple/Webkit. */
+body {
+  -webkit-font-smoothing: antialiased;
+}
