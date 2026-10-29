@@ -50,6 +50,9 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config"; // lê o arquivo .env e disponibiliza em process.env
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const app = express();
 app.use(cors());
@@ -120,11 +123,118 @@ app.post("/api/chat", async (req, res) => {
 // Rota simples de verificação — abrir http://localhost:8787/api/health
 // no navegador mostra se o servidor está de pé e se a chave foi
 // encontrada (sem nunca revelar o valor da chave).
+// Rota inicial do backend — evita "Cannot GET /" quando alguém
+// abre o endereço do servidor diretamente no navegador.
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    nome: "GlyControl — backend",
+    mensagem: "Servidor ativo. Abra o aplicativo no frontend (Vite) em http://localhost:5173.",
+    health: "/api/health",
+  });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, chaveConfigurada: Boolean(GROQ_API_KEY), modelo: GROQ_MODEL });
 });
 
-app.listen(PORT, () => {
+/* ============================================================
+   ARMAZENAMENTO CENTRAL (cross-device)
+   ------------------------------------------------------------
+   O GlyControl nasceu como app 100% front-end, salvando tudo no
+   localStorage do navegador (um aparelho por vez). Para que uma
+   pessoa consiga entrar na própria conta a partir do celular E de
+   outros aparelhos com o mesmo e-mail e senha, os dados precisam
+   morar em um servidor central.
+
+   Aqui implementamos um armazenamento chave-valor mínimo, persistido
+   em um arquivo JSON no servidor. Ele é compartilhado entre todos
+   os aparelhos que apontam para este backend, e separa dados
+   "privados" (conta, histórico de glicemia, refeições, água, chat
+   com a Ana) de dados "compartilhados" (comunidade).
+
+   Observação: este é um protótipo de servidor. Em produção real,
+   substituir por um banco de dados de verdade (PostgreSQL/Supabase)
+   com autenticação real e controle de acesso por usuário.
+   ============================================================ */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "db.json");
+
+async function lerDB() {
+  try {
+    const raw = await fs.readFile(DB_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") throw new Error("db inválido");
+    if (!parsed.priv || typeof parsed.priv !== "object") parsed.priv = {};
+    if (!parsed.shared || typeof parsed.shared !== "object") parsed.shared = {};
+    return parsed;
+  } catch (e) {
+    return { priv: {}, shared: {} };
+  }
+}
+
+async function salvarDB(db) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(DB_FILE, JSON.stringify(db), "utf8");
+}
+
+function bucketDoDB(db, shared) {
+  return shared ? db.shared : db.priv;
+}
+
+// Lê um valor salvo.
+app.get("/api/storage", async (req, res) => {
+  const shared = req.query.shared === "true" || req.query.shared === "1";
+  const key = String(req.query.key || "");
+  if (!key) return res.status(400).json({ error: "Campo 'key' é obrigatório." });
+  const db = await lerDB();
+  const bucket = bucketDoDB(db, shared);
+  // Chave inexistente não é erro: devolve null para o app tratar
+  // como "sem dados ainda" (evita 404 assustadores no console).
+  const value = Object.prototype.hasOwnProperty.call(bucket, key) ? bucket[key] : null;
+  res.json({ key, value, shared });
+});
+
+// Salva/atualiza um valor.
+app.put("/api/storage", async (req, res) => {
+  const { shared, key, value } = req.body || {};
+  const isShared = shared === true || shared === "true" || shared === 1;
+  if (!key) return res.status(400).json({ error: "Campo 'key' é obrigatório." });
+  const db = await lerDB();
+  const bucket = bucketDoDB(db, isShared);
+  bucket[key] = value;
+  await salvarDB(db);
+  res.json({ key, value, shared: isShared });
+});
+
+// Apaga um valor.
+app.delete("/api/storage", async (req, res) => {
+  const shared = req.query.shared === "true" || req.query.shared === "1" ||
+    (req.body && (req.body.shared === true || req.body.shared === "true"));
+  const key = String((req.body && req.body.key) || req.query.key || "");
+  if (!key) return res.status(400).json({ error: "Campo 'key' é obrigatório." });
+  const db = await lerDB();
+  const bucket = bucketDoDB(db, shared);
+  delete bucket[key];
+  await salvarDB(db);
+  res.json({ key, deleted: true, shared });
+});
+
+// Lista chaves com um prefixo.
+app.get("/api/storage/list", async (req, res) => {
+  const shared = req.query.shared === "true" || req.query.shared === "1";
+  const prefix = String(req.query.prefix || "");
+  const db = await lerDB();
+  const bucket = bucketDoDB(db, shared);
+  const marcador = prefix;
+  const keys = Object.keys(bucket).filter(k => k.startsWith(marcador));
+  res.json({ keys, prefix, shared });
+});
+
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor do GlyControl rodando em http://localhost:${PORT}`);
   console.log(GROQ_API_KEY ? "Chave da Groq encontrada." : "AVISO: GROQ_API_KEY não configurada (.env ausente ou vazio).");
+  console.log(`Armazenamento central ativo em ${DB_FILE}`);
 });

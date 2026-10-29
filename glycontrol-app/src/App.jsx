@@ -76,9 +76,99 @@ const DEFAULT_GLI_RANGES = {
   adequadoMin: 80,      // 80-130 mg/dL
   adequadoMax: 130,
   atencaoAltoMax: 180, // 131-180 mg/dL
-  // >= 181 mg/dL = perigoso
+  // >= 185 mg/dL = perigoso
 };
+const METAS_GLICEMIA_CONTEXTO = {
+  "Jejum": { min: 80, max: 130 },
 
+  "Antes do café da manhã": { min: 80, max: 130 },
+  "Depois do café da manhã": { max: 180, posRefeicao: true },
+
+  "Antes do almoço": { min: 80, max: 130 },
+  "Depois do almoço": { max: 180, posRefeicao: true },
+
+  "Antes do jantar": { min: 80, max: 130 },
+  "Depois do jantar": { max: 180, posRefeicao: true },
+
+  "Antes de dormir": { min: 90, max: 150 }
+};
+function avaliarGlicemia(valor, contexto, tempoPosRefeicao = null) {
+  if (valor === "" || valor === null || valor === undefined) {
+    return { status: "invalido", mensagem: "Informe a glicemia." };
+  }
+
+  const glicemia = Number(valor);
+
+  if (!Number.isFinite(glicemia) || glicemia <= 0) {
+    return { status: "invalido", mensagem: "Valor inválido." };
+  }
+
+  // Alertas de segurança em qualquer horário
+  if (glicemia < 54) {
+    return {
+      status: "hipoglicemia_importante",
+      mensagem: "Glicemia muito baixa! É necessária ação imediata."
+    };
+  }
+
+  if (glicemia < 70) {
+    return {
+      status: "hipoglicemia",
+      mensagem: "Glicemia baixa! Siga seu plano de tratamento para hipoglicemia."
+    };
+  }
+
+  const meta = METAS_GLICEMIA_CONTEXTO[contexto];
+
+  if (!meta) {
+    return {
+      status: "sem_contexto",
+      mensagem: "Informe o contexto da medição."
+    };
+  }
+
+  // Depois das refeições
+  if (meta.posRefeicao) {
+    if (tempoPosRefeicao !== "1a2h") {
+      return {
+        status: "tempo_pendente",
+        mensagem: "Informe se a medição ocorreu entre 1 e 2 horas após começar a refeição."
+      };
+    }
+
+    if (glicemia < meta.max) {
+      return {
+        status: "adequado",
+        mensagem: "Glicemia dentro da meta pós-refeição."
+      };
+    }
+
+    return {
+      status: "acima_meta",
+      mensagem: "Glicemia acima da meta pós-refeição."
+    };
+  }
+
+  // Jejum, antes das refeições e antes de dormir
+  if (glicemia < meta.min) {
+    return {
+      status: "abaixo_meta",
+      mensagem: "Glicemia abaixo da meta para esse momento, mas não necessariamente hipoglicemia."
+    };
+  }
+
+  if (glicemia > meta.max) {
+    return {
+      status: "acima_meta",
+      mensagem: "Glicemia acima da meta para esse momento."
+    };
+  }
+
+  return {
+    status: "adequado",
+    mensagem: "Glicemia dentro da meta para esse momento."
+  };
+}
 /* Meta glicêmica individualizada: cada usuário pode ajustar sua
    própria faixa "adequada" no Perfil (padrão: 80-130 mg/dL, igual ao
    protótipo). As faixas de atenção/perigo são recalculadas a partir
@@ -3022,6 +3112,8 @@ export default function GlyControlApp() {
     await storageSet("gc:session", { email }, false);
     setSessionEmail(email);
     setUserData(data);
+    setChatMessages([]);
+    setChatNaoLido(false);
     setErroCadastro("");
     setFase("app");
     setStack([]);
@@ -3061,6 +3153,8 @@ export default function GlyControlApp() {
     await storageSet("gc:session", null, false);
     setSessionEmail(null);
     setUserData(null);
+    setChatMessages([]);
+    setChatNaoLido(false);
     setFase("login");
     setStack([]);
   }
@@ -3072,9 +3166,15 @@ export default function GlyControlApp() {
     delete atualizado[email];
     await storageSet("gc:users", atualizado, false);
     setUsuarios(atualizado);
+    // Privatiza a exclusão: remove também os dados e o chat desta
+    // pessoa, para que seu histórico não fique acessível a outros.
+    try { await window.storage.delete(`gc:userdata:${email}`, false); } catch (e) {}
+    try { await window.storage.delete(`gc:chat:${email}`, false); } catch (e) {}
     await storageSet("gc:session", null, false);
     setSessionEmail(null);
     setUserData(null);
+    setChatMessages([]);
+    setChatNaoLido(false);
     setFase("login");
     setStack([]);
   }

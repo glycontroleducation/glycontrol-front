@@ -7,74 +7,177 @@
  *
  * Fora do ambiente do Claude (rodando localmente pelo VS Code, por
  * exemplo), essa API não existe. Este arquivo recria exatamente a
- * mesma API, mas salvando os dados no localStorage do navegador —
- * assim o App.jsx inteiro funciona sem precisar de nenhuma alteração.
+ * mesma API, mas guardando os dados em dois lugares, em ordem:
  *
- * IMPORTANTE: localStorage é por navegador/computador. Ele NÃO
- * sincroniza entre o celular e o computador, e pode ser apagado se
- * o usuário limpar os dados do site. Para dados "de verdade" que
- * sobrevivem entre dispositivos, no futuro isso pode ser trocado
- * por chamadas a um banco de dados real (ver pasta /database).
+ *   1. Servidor central (backend) — permite que a mesma conta seja
+ *      acessada do celular e de outros aparelhos com o mesmo e-mail
+ *      e senha. É o que torna o login verdadeiramente portátil.
+ *   2. localStorage do navegador — usado como reserva (fallback)
+ *      quando o servidor não estiver disponível, para o app nunca
+ *      parar de funcionar offline.
+ *
+ * IMPORTANTE: dados privados (conta, glicemia, refeições, água,
+ * chat com a Ana) são gravados com shared=false e ficam isolados
+ * por chave/usuário. Dados compartilhados (comunidade) usam
+ * shared=true. O histórico de uma pessoa nunca se mistura com o de
+ * outra porque cada registro é chaveado pelo e-mail do usuário.
  * ------------------------------------------------------------------
  */
 
-// Prefixo colocado em toda chave gravada no localStorage, para não
-// conflitar com outros dados que o navegador possa guardar no mesmo
-// domínio (ex.: de outra extensão ou site).
+// Endereço do backend. Por padrão usa o mesmo origin (proxy do Vite
+// em desenvolvimento, ou o próprio servidor em produção). Pode ser
+// sobrescrito por VITE_API_BASE no .env para apontar para outro
+// servidor (ex.: IP do computador na rede Wi-Fi, para testar no
+// celular).
+const API_BASE = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE)
+  ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, "")
+  : "";
+
 const PREFIXO = "glycontrol:";
 
-// Monta a chave final salva no localStorage, separando dados
-// "privados" (por usuário) de dados "compartilhados" (ex.: comunidade).
 function chaveCompleta(key, shared) {
   return `${PREFIXO}${shared ? "shared" : "priv"}:${key}`;
 }
 
-// Chamada uma única vez, em main.jsx, antes de renderizar o App.
-// Cria window.storage com a mesma "assinatura" (get/set/delete/list)
-// que o App.jsx espera encontrar no ambiente Claude Artifacts.
+async function apiFetch(caminho, opcoes = {}) {
+  const url = `${API_BASE}${caminho}`;
+  const res = await fetch(url, opcoes);
+  return res;
+}
+
+// Tenta o backend primeiro; em caso de falha de rede (ou servidor
+// fora do ar), cai para o localStorage. Erros 404 do backend são
+// repassados (chave realmente não existe), sem mascarar com cache
+// local antigo.
+async function backendGet(key, shared) {
+  const res = await apiFetch(`/api/storage?shared=${shared}&key=${encodeURIComponent(key)}`);
+  if (!res.ok) throw new Error(`Falha no backend (${res.status}).`);
+  const data = await res.json();
+  return { key, value: data.value, shared };
+}
+
+async function backendSet(key, value, shared) {
+  const res = await apiFetch("/api/storage", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shared, key, value }),
+  });
+  if (!res.ok) throw new Error(`Falha no backend (${res.status}).`);
+  return { key, value, shared };
+}
+
+async function backendDelete(key, shared) {
+  const res = await apiFetch(`/api/storage?shared=${shared}&key=${encodeURIComponent(key)}`, { method: "DELETE" });
+  // fallback para body caso o servidor prefira
+  if (res.status === 405 || res.status === 404) {
+    const res2 = await apiFetch("/api/storage", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shared, key }),
+    });
+    if (!res2.ok && res2.status !== 404) throw new Error(`Falha no backend (${res2.status}).`);
+    return { key, deleted: true, shared };
+  }
+  if (!res.ok && res.status !== 404) throw new Error(`Falha no backend (${res.status}).`);
+  return { key, deleted: true, shared };
+}
+
+async function backendList(prefix, shared) {
+  const res = await apiFetch(`/api/storage/list?shared=${shared}&prefix=${encodeURIComponent(prefix)}`);
+  if (!res.ok) throw new Error(`Falha no backend (${res.status}).`);
+  const data = await res.json();
+  return { keys: data.keys || [], prefix, shared };
+}
+
+// ---- localStorage (reserva offline) ----
+function localGet(key, shared) {
+  const k = chaveCompleta(key, shared);
+  const raw = localStorage.getItem(k);
+  if (raw === null) throw new Error(`Chave "${key}" não encontrada no armazenamento local.`);
+  return { key, value: JSON.parse(raw), shared };
+}
+function localSet(key, value, shared) {
+  const k = chaveCompleta(key, shared);
+  localStorage.setItem(k, JSON.stringify(value));
+  return { key, value, shared };
+}
+function localDelete(key, shared) {
+  const k = chaveCompleta(key, shared);
+  localStorage.removeItem(k);
+  return { key, deleted: true, shared };
+}
+function localList(prefix, shared) {
+  const marcador = chaveCompleta(prefix, shared);
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const full = localStorage.key(i);
+    if (full && full.startsWith(marcador)) {
+      keys.push(full.slice(chaveCompleta("", shared).length));
+    }
+  }
+  return { keys, prefix, shared };
+}
+
+function isNetworkError(e) {
+  return !e || e.status === undefined; // fetch lança TypeError sem status
+}
+
 export function instalarStorageShim() {
   if (typeof window === "undefined") return;
 
   window.storage = {
-    // Lê um valor salvo. Lança erro se a chave não existir — o
-    // App.jsx trata esse erro com try/catch (ex.: usuário novo sem
-    // dados salvos ainda).
     async get(key, shared = false) {
-      const k = chaveCompleta(key, shared);
-      const raw = localStorage.getItem(k);
-      if (raw === null) {
-        throw new Error(`Chave "${key}" não encontrada no armazenamento local.`);
-      }
-      return { key, value: JSON.parse(raw), shared };
-    },
-
-    // Salva/atualiza um valor (o App.jsx sempre passa objetos/arrays
-    // já prontos para virar JSON — nunca dados sensíveis "crus").
-    async set(key, value, shared = false) {
-      const k = chaveCompleta(key, shared);
-      localStorage.setItem(k, JSON.stringify(value));
-      return { key, value, shared };
-    },
-
-    // Apaga um valor salvo (ex.: ao excluir a conta do usuário).
-    async delete(key, shared = false) {
-      const k = chaveCompleta(key, shared);
-      localStorage.removeItem(k);
-      return { key, deleted: true, shared };
-    },
-
-    // Lista todas as chaves que começam com um determinado prefixo
-    // (usado, por exemplo, para varrer todos os usuários cadastrados).
-    async list(prefix = "", shared = false) {
-      const marcador = chaveCompleta(prefix, shared);
-      const keys = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const full = localStorage.key(i);
-        if (full && full.startsWith(marcador)) {
-          keys.push(full.slice(chaveCompleta("", shared).length));
+      const s = !!shared;
+      try {
+        const r = await backendGet(key, s);
+        // mantém uma cópia local para uso offline
+        try { localSet(key, r.value, s); } catch (e) {}
+        return r;
+      } catch (e) {
+        if (e && e.status === 404) throw e;
+        if (isNetworkError(e)) {
+          return localGet(key, s);
         }
+        throw e;
       }
-      return { keys, prefix, shared };
+    },
+    async set(key, value, shared = false) {
+      const s = !!shared;
+      try {
+        const r = await backendSet(key, value, s);
+        try { localSet(key, value, s); } catch (e) {}
+        return r;
+      } catch (e) {
+        if (isNetworkError(e)) {
+          return localSet(key, value, s);
+        }
+        throw e;
+      }
+    },
+    async delete(key, shared = false) {
+      const s = !!shared;
+      try {
+        const r = await backendDelete(key, s);
+        try { localDelete(key, s); } catch (e) {}
+        return r;
+      } catch (e) {
+        if (isNetworkError(e)) {
+          return localDelete(key, s);
+        }
+        throw e;
+      }
+    },
+    async list(prefix = "", shared = false) {
+      const s = !!shared;
+      try {
+        const r = await backendList(prefix, s);
+        return r;
+      } catch (e) {
+        if (isNetworkError(e)) {
+          return localList(prefix, s);
+        }
+        throw e;
+      }
     },
   };
 }

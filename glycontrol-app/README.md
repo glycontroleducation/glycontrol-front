@@ -114,6 +114,35 @@ página (F12 → "Sources", ou lendo o arquivo). A chave só deve existir
 no arquivo `.env`, que só o `server/index.js` (rodando no seu
 computador) enxerga.
 
+## Acesso em vários aparelhos (celular + computador)
+
+A partir desta versão, os dados da conta (cadastro, histórico de
+glicemia, refeições, água e chat com a Ana) são gravados em um
+**servidor central** (pasta `server/`), e não mais apenas no
+navegador. Assim, a mesma pessoa pode entrar com seu e-mail e senha
+em outro aparelho e encontrar seu histórico lá.
+
+Para isso, o backend precisa estar rodando e acessível:
+
+1. Rode o backend: `npm run server` (ele agora escuta em
+   `0.0.0.0`, aceitando conexões da rede local).
+2. Rode o site: `npm run dev`.
+3. No celular (mesma rede Wi-Fi), abra
+   `http://IP-DO-COMPUTADOR:5173`. Se o site e o backend estiverem
+   em origens diferentes, defina `VITE_API_BASE=http://IP-DO-COMPUTADOR:8787`
+   antes de rodar o Vite.
+
+Se o backend não estiver disponível, o app continua funcionando usando
+o armazenamento local do navegador (sem sincronização entre aparelhos).
+
+## Privacidade de contas e chat
+
+Cada conta e cada histórico (incluindo as conversas com a Ana) ficam
+isolados por usuário/e-mail. Ao sair da conta ou excluí-la, o estado
+local é limpo para que o histórico de uma pessoa não se misture com o
+de outra no mesmo aparelho. A comunidade continua sendo o único dado
+compartilhado entre usuários.
+
 ## Próximos passos possíveis
 
 - Migrar o banco de alimentos e os dados do usuário para um banco de
